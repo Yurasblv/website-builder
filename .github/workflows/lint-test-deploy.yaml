@@ -1,0 +1,460 @@
+name: PROD - Lint & Deploy
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+
+
+env:
+  APP_ARCHIVE_NAME: "topirank-ai-builder-prod"
+  APP_CONTAINER_NAME: "topirank-ai-builder-prod"
+  APP_DIR_PATH: "/home/ubuntu/topirank-ai-builder-prod"
+  APP_IMAGE_NAME: "topirank-ai-builder-prod"
+  BUILD_DATA_VOLUME_NAME: "topirank-ai-builder-data-prod"
+  DOCKER_NETWORK_NAME: "topirank-network"
+  EXECUTION_MODE: "production"
+  GENERATION_STATUS_TIMEOUT_SECONDS: ${{ vars.GENERATION_STATUS_TIMEOUT_SECONDS }}
+  HOST_PORT: "8004"
+  REDIS_DB: "0"
+  SCRAPER_USE_PROXY: "True"
+  SERVER_IP: ${{ secrets.SERVER_IP }}
+  SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+  SERVER_USER: ${{ secrets.SERVER_USER }}
+  SSH_KEY_NAME: "~/.ssh/ssh_key"
+  STAGE: "production"
+
+  CELERY_BROKER_DB: "0"
+  CELERY_BROKER_URL: "redis://:${{ secrets.REDIS_PASSWORD }}@redis:6379/0"
+  CELERY_IMAGE_NAME: "topirank-ai-builder-prod-celery"
+  CELERY_RESULT_BACKEND: "redis://:${{ secrets.REDIS_PASSWORD }}@redis:6379/1"
+  CELERY_RESULT_DB: "1"
+
+jobs:
+  lint:
+    name: Run lint suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip poetry
+          poetry install
+
+      - name: Create .env file with environment variables
+        run: |
+          echo "BUILD_DATA_VOLUME_NAME=${{ env.BUILD_DATA_VOLUME_NAME }}" > $GITHUB_WORKSPACE/.env
+          echo "CELERY_BROKER_DB=${{ env.CELERY_BROKER_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_BROKER_URL=${{ env.CELERY_BROKER_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_RESULT_BACKEND=${{ env.CELERY_RESULT_BACKEND }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_RESULT_DB=${{ env.CELERY_RESULT_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_DATA_VOLUME_NAME=${{ vars.DB_DATA_VOLUME_NAME }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_HOST=${{ vars.DB_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_NAME=${{ secrets.DB_NAME }}_${{ env.STAGE }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_PORT=${{ vars.DB_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_WORKSPACE/.env
+          echo "DEBUG=${{ vars.DEBUG }}" >> $GITHUB_WORKSPACE/.env
+          echo "DOMAIN=${{ vars.DOMAIN }}" >> $GITHUB_WORKSPACE/.env
+          echo "DYNADOT_API_KEY=${{ secrets.DYNADOT_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "EXECUTION_MODE=${{ env.EXECUTION_MODE}}" >> $GITHUB_WORKSPACE/.env
+          echo "FLUX_API_KEY=${{ secrets.FLUX_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "FLUX_ENDPOINT=${{ vars.FLUX_ENDPOINT }}" >> $GITHUB_WORKSPACE/.env
+          echo "FREEPIK_API_KEY=${{ secrets.FREEPIK_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "FREEPIK_URL=${{ vars.FREEPIK_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_ENDPOINT=${{ vars.LANGSMITH_ENDPOINT }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_PROJECT=${{ vars.LANGSMITH_PROJECT_PROD }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_TRACING=${{ vars.LANGSMITH_TRACING }}" >> $GITHUB_WORKSPACE/.env
+          echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "NEXT_SERVICE_URL=${{ vars.NEXT_SERVICE_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY_PROD }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROJECT_NAME=${{ vars.PROJECT_NAME }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROVIDER_MANAGER_URL=${{ vars.PROVIDER_MANAGER_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROXY_SELLER_API_KEY=${{ secrets.PROXY_SELLER_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_DB=${{ env.REDIS_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}"  >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_PORT=${{ vars.REDIS_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_APPLICATIONS_BUCKET=${{ vars.S3_APPLICATIONS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ASSETS_BUCKET=${{ vars.S3_ASSETS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_AUTHORS_BUCKET=${{ vars.S3_AUTHORS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ENDPOINT_URL=${{ vars.S3_ENDPOINT_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_PBN_ASSETS_BUCKET=${{ vars.S3_PBN_ASSETS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_REGION=${{ vars.S3_REGION }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_TOPICS_BUCKET=${{ vars.S3_TOPICS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "SCRAPER_USE_PROXY=${{ env.SCRAPER_USE_PROXY }}" >> $GITHUB_WORKSPACE/.env
+          echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> $GITHUB_WORKSPACE/.env
+          echo "SENTRY_WORKER_DSN=${{ secrets.SENTRY_WORKER_DSN }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERP_API_KEY=${{ secrets.SERP_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERVER_HOST=${{ vars.SERVER_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERVER_PORT=${{ vars.SERVER_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "STAGE=${{ env.STAGE }}" >> $GITHUB_WORKSPACE/.env
+          echo "STORAGE_BACKEND=${{ vars.STORAGE_BACKEND }}" >> $GITHUB_WORKSPACE/.env
+          echo "VERSION=${{ vars.VERSION }}" >> $GITHUB_WORKSPACE/.env
+          echo "WP_BASE_URL=${{ vars.WP_BASE_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+
+      - name: Grant privileges
+        run: chmod +x ./lint.sh
+
+      - name: Run testing phase
+        run: ./lint.sh
+
+  build-upload:
+    needs: lint
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.set_tag.outputs.TAG }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          echo "BUILD_DATA_VOLUME_NAME=${{ env.BUILD_DATA_VOLUME_NAME }}" > $GITHUB_WORKSPACE/.env
+          echo "CELERY_BROKER_DB=${{ env.CELERY_BROKER_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_BROKER_URL=${{ env.CELERY_BROKER_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_RESULT_BACKEND=${{ env.CELERY_RESULT_BACKEND }}" >> $GITHUB_WORKSPACE/.env
+          echo "CELERY_RESULT_DB=${{ env.CELERY_RESULT_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_DATA_VOLUME_NAME=${{ vars.DB_DATA_VOLUME_NAME }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_HOST=${{ vars.DB_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_NAME=${{ secrets.DB_NAME }}_${{ env.STAGE }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_PORT=${{ vars.DB_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_WORKSPACE/.env
+          echo "DEBUG=${{ vars.DEBUG }}" >> $GITHUB_WORKSPACE/.env
+          echo "DOMAIN=${{ vars.DOMAIN }}" >> $GITHUB_WORKSPACE/.env
+          echo "DYNADOT_API_KEY=${{ secrets.DYNADOT_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "EXECUTION_MODE=${{ env.EXECUTION_MODE}}" >> $GITHUB_WORKSPACE/.env
+          echo "FLUX_API_KEY=${{ secrets.FLUX_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "FLUX_ENDPOINT=${{ vars.FLUX_ENDPOINT }}" >> $GITHUB_WORKSPACE/.env
+          echo "FREEPIK_API_KEY=${{ secrets.FREEPIK_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "FREEPIK_URL=${{ vars.FREEPIK_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_ENDPOINT=${{ vars.LANGSMITH_ENDPOINT }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_PROJECT=${{ vars.LANGSMITH_PROJECT_PROD }}" >> $GITHUB_WORKSPACE/.env
+          echo "LANGSMITH_TRACING=${{ vars.LANGSMITH_TRACING }}" >> $GITHUB_WORKSPACE/.env
+          echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "NEXT_SERVICE_URL=${{ vars.NEXT_SERVICE_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY_PROD }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROJECT_NAME=${{ vars.PROJECT_NAME }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROVIDER_MANAGER_URL=${{ vars.PROVIDER_MANAGER_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "PROXY_SELLER_API_KEY=${{ secrets.PROXY_SELLER_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}"  >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_PORT=${{ vars.REDIS_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "REDIS_DB=${{ env.REDIS_DB }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_APPLICATIONS_BUCKET=${{ vars.S3_APPLICATIONS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ASSETS_BUCKET=${{ vars.S3_ASSETS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_AUTHORS_BUCKET=${{ vars.S3_AUTHORS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_ENDPOINT_URL=${{ vars.S3_ENDPOINT_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_PBN_ASSETS_BUCKET=${{ vars.S3_PBN_ASSETS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_REGION=${{ vars.S3_REGION }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "S3_TOPICS_BUCKET=${{ vars.S3_TOPICS_BUCKET }}" >> $GITHUB_WORKSPACE/.env
+          echo "SCRAPER_USE_PROXY=${{ env.SCRAPER_USE_PROXY }}" >> $GITHUB_WORKSPACE/.env
+          echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> $GITHUB_WORKSPACE/.env
+          echo "SENTRY_WORKER_DSN=${{ secrets.SENTRY_WORKER_DSN }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERP_API_KEY=${{ secrets.SERP_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERVER_HOST=${{ vars.SERVER_HOST }}" >> $GITHUB_WORKSPACE/.env
+          echo "SERVER_PORT=${{ vars.SERVER_PORT }}" >> $GITHUB_WORKSPACE/.env
+          echo "STAGE=${{ env.STAGE }}" >> $GITHUB_WORKSPACE/.env
+          echo "STORAGE_BACKEND=${{ vars.STORAGE_BACKEND }}" >> $GITHUB_WORKSPACE/.env
+          echo "VERSION=${{ vars.VERSION }}" >> $GITHUB_WORKSPACE/.env
+          echo "WP_BASE_URL=${{ vars.WP_BASE_URL }}" >> $GITHUB_WORKSPACE/.env
+          echo "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" >> $GITHUB_WORKSPACE/.env
+
+
+      - name: Create tag from GitHub SHA and set it as an output
+        id: set_tag
+        run: echo "TAG=`echo ${{ github.sha }} | cut -c1-7`" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx action
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export Docker Image
+        uses: docker/build-push-action@v6
+        env:
+          TAG: ${{ steps.set_tag.outputs.TAG }}
+        with:
+          context: .
+          tags: ${{ env.APP_IMAGE_NAME }}:latest, ${{ env.APP_IMAGE_NAME }}:${{ env.TAG }}
+          outputs: type=docker,dest=/tmp/${{ env.APP_ARCHIVE_NAME }}.tar.gz
+
+      - name: Build and export Celery Image
+        uses: docker/build-push-action@v6
+        env:
+          TAG: ${{ steps.set_tag.outputs.TAG }}
+        with:
+          context: .
+          file: dockerfiles/celery_worker.Dockerfile
+          tags: ${{ env.CELERY_IMAGE_NAME }}:latest, ${{ env.CELERY_IMAGE_NAME }}:${{ env.TAG }}
+          outputs: type=docker,dest=/tmp/${{ env.CELERY_IMAGE_NAME }}.tar.gz
+
+      - name: Upload Docker Image artifact to GitHub
+        uses: actions/upload-artifact@v4
+        env:
+          TAG: ${{ steps.set_tag.outputs.TAG }}
+        with:
+          name: ${{ env.APP_IMAGE_NAME }}-${{ env.TAG }}
+          path: /tmp/${{ env.APP_ARCHIVE_NAME }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Create .env file if not exists and backup previous .env file on server
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            mkdir -p ${{ env.APP_DIR_PATH }}
+            touch ${{ env.APP_DIR_PATH }}/.env || true
+            mv ${{ env.APP_DIR_PATH }}/.env ${{ env.APP_DIR_PATH }}/.env-previous
+          EOF
+
+      - name: Copy .env file to server
+        run: |
+          scp -i ${{ env.SSH_KEY_NAME }} $GITHUB_WORKSPACE/.env ${{ env.SERVER_USER }}@${{ env.SERVER_IP }}:${{ env.APP_DIR_PATH }}
+
+      - name: Backup .env file with specific tag on server
+        env:
+          TAG: ${{ steps.set_tag.outputs.TAG }}
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            cp ${{ env.APP_DIR_PATH }}/.env ${{ env.APP_DIR_PATH }}/.env-${{ env.TAG }}
+          EOF
+
+      - name: Copy Docker Image to server
+        run: |
+          scp -i ${{ env.SSH_KEY_NAME }} /tmp/${{ env.APP_ARCHIVE_NAME }}.tar.gz ${{ env.SERVER_USER }}@${{ env.SERVER_IP }}:${{ env.APP_DIR_PATH }}
+
+      - name: Copy Celery Docker Image to server
+        run: |
+          scp -i ${{ env.SSH_KEY_NAME }} /tmp/${{ env.CELERY_IMAGE_NAME }}.tar.gz ${{ env.SERVER_USER }}@${{ env.SERVER_IP }}:${{ env.APP_DIR_PATH }}
+
+      - name: Signal readiness for deploy
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            if [[ $(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command --help || echo 'Not found'") == "Not found" ]]; then
+                echo "Command not found. Skipping signal deploy ready."
+          
+            elif [[ "$(docker inspect --format='{{.State.Status}}' ${{ env.APP_CONTAINER_NAME }})" != "running" ]]; then
+              echo "Container ${{ env.APP_CONTAINER_NAME }} is not running. Cannot signal deploy ready"
+          
+            else
+              echo "Running signal deploy ready."
+              docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command deploy ready"
+              echo "Signal deploy ready executed successfully."
+            fi
+          EOF
+
+  check-status:
+    needs: build-upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Check status of generation from server
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            if [[ $(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command --help || echo 'Not found'") == "Not found" ]]; then
+              echo "Command not found. Skipping signal deploy status."
+          
+            elif [[ "$(docker inspect --format='{{.State.Status}}' ${{ env.APP_CONTAINER_NAME }})" != "running" ]]; then
+              echo "Container ${{ env.APP_CONTAINER_NAME }} is not running. Cannot signal deploy status"
+          
+            else
+              TIME_LIMIT=${{ env.GENERATION_STATUS_TIMEOUT_SECONDS }}
+              INTERVAL=60 # 1 minute
+              for (( counter=0; counter<$TIME_LIMIT; counter+=$INTERVAL )); do
+            
+                if [[ $(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command deploy status") == "False" ]]; then
+                  echo "Status false at $(( $counter/60 )) minutes"
+                  sleep $INTERVAL
+            
+                elif [[ $(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command deploy status") == "True" ]]; then
+                  echo "Status true. Continuing with deploy"
+                  break
+            
+                else
+                  echo "Unexpected"
+                  echo "$(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c 'python -m command deploy status')"
+                  exit 1
+            
+                fi
+              done
+            fi
+          EOF
+
+  deploy:
+    needs: check-status
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            docker load < ${{ env.APP_DIR_PATH }}/${{ env.APP_ARCHIVE_NAME }}.tar.gz
+            docker network create ${{ env.DOCKER_NETWORK_NAME }} || true
+            docker stop ${{ env.APP_CONTAINER_NAME }} || true
+            docker rm ${{ env.APP_CONTAINER_NAME }} || true
+            docker run -d \
+            --restart unless-stopped \
+            --env-file ${{ env.APP_DIR_PATH }}/.env \
+            --name ${{ env.APP_CONTAINER_NAME }} \
+            --label logging='promtail' \
+            --label logging_jobname='containerlogs' \
+            --health-cmd="curl -f http://localhost:8000/api/health-check || exit 1" \
+            --health-interval=30s \
+            --health-timeout=10s \
+            --health-retries=3 \
+            --health-start-period=10s \
+            -p ${{ env.HOST_PORT }}:8000 \
+            --network ${{ env.DOCKER_NETWORK_NAME }} \
+            ${{ env.APP_IMAGE_NAME }}:latest
+          EOF
+
+  rollback:
+    needs: [build-upload, deploy]
+    if: ${{ always() && (needs.deploy.result == 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Rollback to previous version
+        env:
+          TAG: ${{ needs.build-upload.outputs.tag }}
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            export ROLLBACK_TAG=$(docker images | grep ${{ env.APP_IMAGE_NAME }} | grep -v 'latest' | grep -v "${{ env.TAG }}" | head -n 1 | awk '{print $2}')
+            rm ${{ env.APP_DIR_PATH }}/.env || true
+            mv ${{ env.APP_DIR_PATH }}/.env-previous ${{ env.APP_DIR_PATH }}/.env || true
+            docker stop ${{ env.APP_CONTAINER_NAME }} || true
+            docker rm ${{ env.APP_CONTAINER_NAME }} || true
+            docker run -d \
+            --restart unless-stopped \
+            --env-file ${{ env.APP_DIR_PATH }}/.env \
+            --name ${{ env.APP_CONTAINER_NAME }} \
+            --label logging='promtail' \
+            --label logging_jobname='containerlogs' \
+            --health-cmd="curl -f http://localhost:8000/api/health-check || exit 1" \
+            --health-interval=30s \
+            --health-timeout=10s \
+            --health-retries=3 \
+            --health-start-period=10s \
+            -p ${{ env.HOST_PORT }}:8000 \
+            --network ${{ env.DOCKER_NETWORK_NAME }} \
+            ${{ env.APP_IMAGE_NAME }}:$ROLLBACK_TAG
+            docker rmi ${{ env.APP_IMAGE_NAME }}:latest ${{ env.APP_IMAGE_NAME }}:${{ env.TAG }}
+          EOF
+
+  check-status-and-rollback:
+    uses: Alexysureau/Topirank-Ai-Builder/.github/workflows/check-and-rollback.yml@main
+    needs: [build-upload, deploy]
+    with:
+      tag: ${{ needs.build-upload.outputs.tag }}
+      DOCKER_NETWORK_NAME: "topirank-network"
+      APP_CONTAINER_NAME: "topirank-ai-builder-prod"
+      APP_IMAGE_NAME: "topirank-ai-builder-prod"
+      APP_DIR_PATH: "/home/ubuntu/topirank-ai-builder-prod"
+      HOST_PORT: "8004"
+    secrets:
+      server_ssh_key: ${{ secrets.SERVER_SSH_KEY }}
+      server_user: ${{ secrets.SERVER_USER }}
+      server_ip: ${{ secrets.SERVER_IP }}
+
+  deploy-celery:
+    uses: Alexysureau/Topirank-Ai-Builder/.github/workflows/celery-deployment.yml@main
+    needs: check-status-and-rollback
+    if: ${{ always() && (needs.check-status-and-rollback.result == 'success') }}
+    with:
+      BACKEND_ENV_FILE_PATH: "/home/ubuntu/topirank-ai-builder-prod"
+      BUILD_DATA_VOLUME_NAME: "topirank-ai-builder-data-prod"
+      CELERY_BEAT_CONTAINER_NAME: "topirank-ai-builder-prod-celery-beat"
+      CELERY_ENV_FILE_PATH: "/home/ubuntu/topirank-ai-builder-prod-celery"
+      CELERY_IMAGE_NAME: "topirank-ai-builder-prod-celery"
+      CELERY_WORKER_CONTAINER_NAME: "topirank-ai-builder-prod-celery-worker"
+      DOCKER_NETWORK_NAME: "topirank-network"
+    secrets:
+      server_ssh_key: ${{ secrets.SERVER_SSH_KEY }}
+      server_user: ${{ secrets.SERVER_USER }}
+      server_ip: ${{ secrets.SERVER_IP }}
+
+  signal-deploy-done:
+    needs: [ deploy, check-status-and-rollback, rollback, deploy-celery ]
+    # always run step after all above skipped or not
+    if: ${{ always() && needs.deploy.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Wait until the container is running
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            echo "Checking if command exists in the container..."
+
+            TIME_LIMIT=${{ env.GENERATION_STATUS_TIMEOUT_SECONDS }}
+            INTERVAL=60 # 1 minute
+            for (( counter=0; counter<$TIME_LIMIT; counter+=$INTERVAL )); do
+              if [[ "$(docker inspect --format='{{.State.Status}}' ${{ env.APP_CONTAINER_NAME }})" != "running" ]]; then
+                echo "Container ${{ env.APP_CONTAINER_NAME }} is not running. Sleeping for $(( $counter/60 )) minutes"
+                sleep $INTERVAL
+              else
+                echo "Container ${{ env.APP_CONTAINER_NAME }} is running. Proceeding with deploy done signal."
+                break
+              fi
+            done
+          EOF
+
+      - name: Check status of generation from server
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            if [[ $(docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c "python -m command --help || echo 'Not found'") == "Not found" ]]; then
+              echo "Command not found. Skipping signal deploy done."
+
+            else
+              echo "Running signal deploy done."
+              docker exec ${{ env.APP_CONTAINER_NAME }} /bin/bash -c 'python -m command deploy done'
+              echo "Signal deploy done executed successfully."
+            fi
+          EOF
+

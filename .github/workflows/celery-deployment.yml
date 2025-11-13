@@ -1,0 +1,118 @@
+name: Celery Deployment
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      BACKEND_ENV_FILE_PATH:
+        description: "Path to backend env file"
+        required: true
+        type: string
+      BUILD_DATA_VOLUME_NAME:
+        description: "Volume name for build data"
+        required: true
+        type: string
+      CELERY_BEAT_CONTAINER_NAME:
+        description: "Celery beat container name"
+        required: true
+        type: string
+      CELERY_ENV_FILE_PATH:
+        description: "Path to celery env file"
+        required: true
+        type: string
+      CELERY_IMAGE_NAME:
+        description: "Celery image name"
+        required: true
+        type: string
+      CELERY_WORKER_CONTAINER_NAME:
+        description: "Celery worker container name"
+        required: true
+        type: string
+      DOCKER_NETWORK_NAME:
+        description: "Docker network name"
+        required: true
+        type: string
+
+    secrets:
+      server_ssh_key:
+        description: "SSH private key for server"
+        required: true
+      server_user:
+        description: "Username for server"
+        required: true
+      server_ip:
+        description: "IP address of server"
+        required: true
+
+env:
+  BACKEND_ENV_FILE_PATH: ${{ inputs.BACKEND_ENV_FILE_PATH }}
+  BUILD_DATA_VOLUME_NAME: ${{ inputs.BUILD_DATA_VOLUME_NAME }}
+  CELERY_BEAT_CONTAINER_NAME: ${{ inputs.CELERY_BEAT_CONTAINER_NAME }}
+  CELERY_ENV_FILE_PATH: ${{ inputs.CELERY_ENV_FILE_PATH }}
+  CELERY_IMAGE_NAME: ${{ inputs.CELERY_IMAGE_NAME }}
+  CELERY_WORKER_CONTAINER_NAME: ${{ inputs.CELERY_WORKER_CONTAINER_NAME }}
+  DOCKER_NETWORK_NAME: ${{ inputs.DOCKER_NETWORK_NAME }}
+  SERVER_IP: ${{ secrets.server_ip }}
+  SERVER_SSH_KEY: ${{ secrets.server_ssh_key }}
+  SERVER_USER: ${{ secrets.server_user }}
+
+jobs:
+  deploy-celery-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ~/.ssh/ssh_key
+          chmod 600 ~/.ssh/ssh_key
+          touch ~/.ssh/known_hosts || true
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy Celery Worker on Server
+        run: |
+          ssh -i ~/.ssh/ssh_key ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            mkdir -p ${{ env.CELERY_ENV_FILE_PATH }}
+            cp ${{ env.BACKEND_ENV_FILE_PATH }}/.env ${{ env.CELERY_ENV_FILE_PATH }}/.env || true
+            docker load < ${{ env.BACKEND_ENV_FILE_PATH }}/${{ env.CELERY_IMAGE_NAME }}.tar.gz
+            docker stop ${{ env.CELERY_WORKER_CONTAINER_NAME }} || true
+            docker rm ${{ env.CELERY_WORKER_CONTAINER_NAME }} || true
+            docker run -d \
+              --name ${{ env.CELERY_WORKER_CONTAINER_NAME }} \
+              --network ${{ env.DOCKER_NETWORK_NAME }} \
+              --env-file ${{ env.CELERY_ENV_FILE_PATH }}/.env \
+              --restart unless-stopped \
+              --label logging='promtail' \
+              --label logging_jobname='containerlogs' \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume ${{ env.BUILD_DATA_VOLUME_NAME }}:/app/temp \
+              ${{ env.CELERY_IMAGE_NAME }}:latest \
+              /bin/sh -c 'celery -A app.celery.config worker --loglevel info --concurrency 5 --queues "clusters,pbn"'
+          EOF
+
+  deploy-celery-beat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ~/.ssh/ssh_key
+          chmod 600 ~/.ssh/ssh_key
+          touch ~/.ssh/known_hosts || true
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy Celery Beat on Server
+        run: |
+          ssh -i ~/.ssh/ssh_key ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            docker load < ${{ env.BACKEND_ENV_FILE_PATH }}/${{ env.CELERY_IMAGE_NAME }}.tar.gz
+            docker stop ${{ env.CELERY_BEAT_CONTAINER_NAME }} || true
+            docker rm ${{ env.CELERY_BEAT_CONTAINER_NAME }} || true
+            docker run -d \
+              --name ${{ env.CELERY_BEAT_CONTAINER_NAME }} \
+              --network ${{ env.DOCKER_NETWORK_NAME }} \
+              --env-file ${{ env.CELERY_ENV_FILE_PATH }}/.env \
+              --restart unless-stopped \
+              --label logging='promtail' \
+              --label logging_jobname='containerlogs' \
+              ${{ env.CELERY_IMAGE_NAME }}:latest \
+              /bin/sh -c "celery -A app.celery:celery_app beat --loglevel=info"
+          EOF

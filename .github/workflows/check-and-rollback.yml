@@ -1,0 +1,123 @@
+name: Check Status and Rollback if Needed
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Docker Image tag from GitHub SHA"
+        required: true
+        type: string
+      DOCKER_NETWORK_NAME:
+        description: "Docker network name"
+        required: true
+        type: string
+      APP_CONTAINER_NAME:
+        description: "Application container name"
+        required: true
+        type: string
+      APP_IMAGE_NAME:
+        description: "Application image name"
+        required: true
+        type: string
+      APP_DIR_PATH:
+        description: "Path to application directory"
+        required: true
+        type: string
+      HOST_PORT:
+        description: "Port on the host machine that will be mapped to the container port"
+        required: true
+        type: string
+    secrets:
+      server_ssh_key:
+        description: "SSH private key for server"
+        required: true
+      server_user:
+        description: "Username for server"
+        required: true
+      server_ip:
+        description: "IP address of server"
+        required: true
+
+env:
+  SERVER_SSH_KEY: ${{ secrets.server_ssh_key }}
+  SERVER_USER: ${{ secrets.server_user }}
+  SERVER_IP: ${{ secrets.server_ip }}
+  SSH_KEY_NAME: "~/.ssh/ssh_key"
+  TAG: ${{ inputs.tag }}
+  DOCKER_NETWORK_NAME: ${{ inputs.DOCKER_NETWORK_NAME }}
+  APP_CONTAINER_NAME: ${{ inputs.APP_CONTAINER_NAME }}
+  APP_IMAGE_NAME: ${{ inputs.APP_IMAGE_NAME }}
+  APP_DIR_PATH: ${{ inputs.APP_DIR_PATH }}
+  HOST_PORT: ${{ inputs.HOST_PORT }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Check Container Status
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            CONTAINER_NAME=${{ env.APP_CONTAINER_NAME }}
+            TIME_LIMIT=60
+            container_stopped=false
+            for (( i=0; i<$TIME_LIMIT; i+=5 )); do
+                if [[ "$(docker inspect --format='{{.State.Status}}' $CONTAINER_NAME)" != "running" ]]; then
+                    container_stopped=true
+                    echo "Container $CONTAINER_NAME stopped running at $i seconds."
+                    break
+                else
+                    echo "Check $i seconds: Container $CONTAINER_NAME is still running."
+                fi
+                sleep 5
+            done
+            if $container_stopped; then
+                echo "Error: Container $CONTAINER_NAME was not running continuously during the $TIME_LIMIT seconds."
+                exit 1
+            else
+                echo "Success: Container $CONTAINER_NAME was running continuously for $TIME_LIMIT seconds."
+            fi
+          EOF
+
+  rollback:
+    needs: check
+    if: ${{ always() && (needs.check.result == 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH connection
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SERVER_SSH_KEY }}" > ${{ env.SSH_KEY_NAME }}
+          chmod 600 ${{ env.SSH_KEY_NAME }}
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Rollback to previous version
+        run: |
+          ssh -i ${{ env.SSH_KEY_NAME }} ${{ env.SERVER_USER }}@${{ env.SERVER_IP }} << 'EOF'
+            export ROLLBACK_TAG=$(docker images | grep ${{ env.APP_IMAGE_NAME }} | grep -v 'latest' | grep -v "${{ env.TAG }}" | head -n 1 | awk '{print $2}')
+            rm ${{ env.APP_DIR_PATH }}/.env || true
+            mv ${{ env.APP_DIR_PATH }}/.env-previous ${{ env.APP_DIR_PATH }}/.env || true
+            docker stop ${{ env.APP_CONTAINER_NAME }} || true
+            docker rm ${{ env.APP_CONTAINER_NAME }} || true
+            docker run -d \
+            --restart unless-stopped \
+            --env-file ${{ env.APP_DIR_PATH }}/.env \
+            --name ${{ env.APP_CONTAINER_NAME }} \
+            --label logging='promtail' \
+            --label logging_jobname='containerlogs' \
+            --health-cmd="curl -f http://localhost:8000/api/ping || exit 1" \
+            --health-interval=30s \
+            --health-timeout=10s \
+            --health-retries=3 \
+            --health-start-period=10s \
+            -p ${{ env.HOST_PORT }}:8000 \
+            --network ${{ env.DOCKER_NETWORK_NAME }} \
+            ${{ env.APP_IMAGE_NAME }}:$ROLLBACK_TAG
+            docker rmi ${{ env.APP_IMAGE_NAME }}:latest ${{ env.APP_IMAGE_NAME }}:${{ env.TAG }}
+          EOF

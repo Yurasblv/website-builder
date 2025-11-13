@@ -1,0 +1,10 @@
+.env
+.idea/
+.mypy_cache
+db-data
+__pycache__
+venv
+/logs/
+/log-rotate-state
+/media/
+.DS_Store

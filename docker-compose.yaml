@@ -1,0 +1,85 @@
+x-celery-worker: &celery_worker
+  image: celery_worker:latest
+  build:
+    context: .
+    dockerfile: ./dockerfiles/celery_worker.Dockerfile
+  platform: linux/amd64
+services:
+  app:
+    container_name: topirank-ai-builder
+    build: .
+    depends_on:
+      - worker
+    restart: unless-stopped
+    labels:
+      logging: "promtail"
+      logging_jobname: "containerlogs"
+    ports:
+      - ${SERVER_PORT}:${SERVER_PORT}
+    expose:
+      - ${SERVER_PORT}
+    networks:
+      - topirank-network
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+    volumes:
+      - .:/app
+  worker:
+    <<: *celery_worker
+    container_name: ai-celery-worker
+    command: celery -A app.celery.config worker --loglevel=info --concurrency=5 --queues celery clusters pbns
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - topirank-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - build_data:/app/temp
+
+  periodic:
+    <<: *celery_worker
+    container_name: ai-celery-periodic-worker
+    command: celery -A app.celery.config worker --loglevel=info --concurrency=5 -Q periodic -n periodic@%h
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - topirank-network
+
+  beat:
+    <<: *celery_worker
+    container_name: ai-celery-beat
+    command: celery -A app.celery:celery_app beat --loglevel=info
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - periodic
+    networks:
+      - topirank-network
+
+volumes:
+  redis_data:
+    external: true
+  build_data:
+    name: ${BUILD_DATA_VOLUME_NAME}
+    external: true
+
+networks:
+  topirank-network:
+    external: true
+    driver: bridge
